@@ -45,6 +45,13 @@ const DesktopView: React.FC = () => {
             socket.emit('join');
         });
 
+        socket.on('existing-peers', (peers: string[]) => {
+            if (peers.length > 0) {
+                setStatus('Phone detected! Creating WebRTC connection...');
+                createPeerConnection(peers[0]);
+            }
+        });
+
         socket.on('user-joined', (peerId: string) => {
             setStatus('Phone detected! Creating WebRTC connection...');
             createPeerConnection(peerId);

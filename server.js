@@ -18,8 +18,14 @@ const io = new Server(server, {
   }
 });
 
+const connectedPeers = new Set();
+
 io.on('connection', (socket) => {
+  connectedPeers.add(socket.id);
+
   socket.on('join', () => {
+    const others = Array.from(connectedPeers).filter((id) => id !== socket.id);
+    socket.emit('existing-peers', others);
     socket.broadcast.emit('user-joined', socket.id);
   });
 
@@ -33,6 +39,10 @@ io.on('connection', (socket) => {
 
   socket.on('ice-candidate', (payload) => {
     socket.to(payload.target).emit('ice-candidate', { candidate: payload.candidate });
+  });
+  socket.on('disconnect', () => {
+    connectedPeers.delete(socket.id);
+    socket.broadcast.emit('user-left', socket.id);
   });
 });
 

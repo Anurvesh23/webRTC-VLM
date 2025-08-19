@@ -59,6 +59,10 @@ const PhoneView: React.FC = () => {
             socket.emit('join');
         });
 
+        socket.on('user-joined', (peerId: string) => {
+            setStatus('Desktop detected. Ready to answer.');
+        });
+
         socket.on('offer', async (payload: { from: string; offer: RTCSessionDescriptionInit }) => {
             setStatus('Received offer, creating answer...');
             createPeerConnection(payload.from);
