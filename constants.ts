@@ -1,7 +1,8 @@
 
 // --- NETWORKING ---
-export const SIGNALING_SERVER_URL = `http://${window.location.hostname}:3001`;
-export const API_SERVER_URL = `http://${window.location.hostname}:8000`;
+// Prefer a configured URL for hosted deployments (e.g., ngrok/Render/Railway). Fallback to LAN default.
+export const SIGNALING_SERVER_URL = (import.meta as any).env?.VITE_SIGNALING_SERVER_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
+export const API_SERVER_URL = (import.meta as any).env?.VITE_API_SERVER_URL || `${window.location.protocol}//${window.location.hostname}:8000`;
 export const ICE_SERVERS = {
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 };
