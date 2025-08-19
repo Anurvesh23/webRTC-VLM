@@ -93,6 +93,10 @@ const PhoneView: React.FC = () => {
             }
         });
 
+        socket.on('user-left', (peerId: string) => {
+            setStatus('Desktop left. Waiting for reconnection.');
+        });
+
         return () => {
             socket.disconnect();
             if (localStreamRef.current) {

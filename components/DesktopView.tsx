@@ -96,11 +96,21 @@ const DesktopView: React.FC = () => {
             }
         };
 
+        pc.oniceconnectionstatechange = () => {
+            console.log('[desktop] iceConnectionState:', pc.iceConnectionState);
+            setStatus(`ICE: ${pc.iceConnectionState}`);
+        };
+
+        pc.onconnectionstatechange = () => {
+            console.log('[desktop] connectionState:', pc.connectionState);
+        };
+
         pc.ontrack = (event) => {
             if (event.streams && event.streams[0]) {
                 setRemoteStream(event.streams[0]);
                 if (videoRef.current) {
                     videoRef.current.srcObject = event.streams[0];
+                    videoRef.current.play?.().catch((e) => console.warn('[desktop] video play blocked:', e));
                 }
                 setStatus('Video stream connected!');
                 setShowQr(false);
@@ -111,7 +121,7 @@ const DesktopView: React.FC = () => {
         try {
             pc.addTransceiver('video', { direction: 'recvonly' });
         } catch {}
-        const offer = await pc.createOffer();
+        const offer = await pc.createOffer({ offerToReceiveVideo: true });
         await pc.setLocalDescription(offer);
 
         if (mode === 'wasm') {
@@ -237,7 +247,7 @@ const DesktopView: React.FC = () => {
                     <p className="font-mono text-sm text-green-400 animate-pulse">{isLoadingModel ? "Loading Model..." : (modelError || status)}</p>
                 </div>
                 <div className="relative w-full aspect-video bg-black rounded-b-lg overflow-hidden">
-                    <video ref={videoRef} autoPlay playsInline className="w-full h-full object-contain" />
+                    <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-contain" />
                     <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
                 </div>
             </div>
