@@ -51,12 +51,13 @@ const PhoneView: React.FC = () => {
     useEffect(() => {
         startCamera();
 
-        const socket = io(SIGNALING_SERVER_URL);
+        const socket = io(SIGNALING_SERVER_URL, { transports: ['websocket', 'polling'] });
         socketRef.current = socket;
 
         socket.on('connect', () => {
             setStatus('Connected to signaling server.');
             socket.emit('join');
+            console.log('[phone] connected to signaling', SIGNALING_SERVER_URL, 'id=', socket.id);
         });
 
         socket.on('user-joined', (peerId: string) => {

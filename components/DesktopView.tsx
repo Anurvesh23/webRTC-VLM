@@ -38,15 +38,17 @@ const DesktopView: React.FC = () => {
     }, []);
 
     const setupSignaling = useCallback(() => {
-        const socket = io(SIGNALING_SERVER_URL);
+        const socket = io(SIGNALING_SERVER_URL, { transports: ['websocket', 'polling'] });
         socketRef.current = socket;
 
         socket.on('connect', () => {
+            console.log('[desktop] connected to signaling', SIGNALING_SERVER_URL, 'id=', socket.id);
             socket.emit('join');
         });
 
         socket.on('existing-peers', (peers: string[]) => {
             if (peers.length > 0) {
+                console.log('[desktop] existing-peers', peers);
                 setStatus('Phone detected! Creating WebRTC connection...');
                 createPeerConnection(peers[0]);
             }
@@ -61,6 +63,7 @@ const DesktopView: React.FC = () => {
             if (peerConnectionRef.current) {
                 try {
                     await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload.answer));
+                    console.log('[desktop] remote description set');
                 } catch (error) {
                     console.error('Error setting remote description:', error);
                 }
