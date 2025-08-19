@@ -145,6 +145,12 @@ const DesktopView: React.FC = () => {
         }
     }, [mode]);
 
+    const colorForClass = (classId: number): string => {
+        // Simple deterministic color palette based on classId
+        const hue = (classId * 47) % 360;
+        return `hsl(${hue}, 80%, 55%)`;
+    };
+
     const drawDetections = useCallback((detectionsToDraw: DetectionBox[]) => {
         const canvas = canvasRef.current;
         const video = videoRef.current;
@@ -164,12 +170,12 @@ const DesktopView: React.FC = () => {
             const rectWidth = (w / MODEL_WIDTH) * canvas.width;
             const rectHeight = (h / MODEL_HEIGHT) * canvas.height;
 
-            ctx.strokeStyle = '#10B981';
+            ctx.strokeStyle = colorForClass(classId);
             ctx.lineWidth = 3;
             ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
 
             const label = `${COCO_CLASSES[classId]}: ${score.toFixed(2)}`;
-            ctx.fillStyle = '#10B981';
+            ctx.fillStyle = colorForClass(classId);
             ctx.font = '16px sans-serif';
             const textWidth = ctx.measureText(label).width;
             ctx.fillRect(rectX, rectY > 20 ? rectY - 22 : rectY, textWidth + 8, 22);
@@ -256,6 +262,24 @@ const DesktopView: React.FC = () => {
                 <div className="mt-8 p-6 bg-white rounded-lg shadow-lg text-center text-gray-800 flex flex-col items-center">
                     <h2 className="text-xl font-semibold mb-4">Scan with your phone to connect</h2>
                     <div id="qrcode" className="leading-[0]"></div>
+                </div>
+            )}
+
+            {/* Legend with multi-object counts */}
+            {!showQr && detections.length > 0 && (
+                <div className="mt-4 w-full max-w-4xl grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                    {Array.from(
+                        detections.reduce<Map<number, number>>((map, d) => map.set(d.classId, (map.get(d.classId) || 0) + 1), new Map())
+                    ).slice(0, 8).map(([classId, count]) => (
+                        <div key={classId} className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded px-2 py-1">
+                            <span
+                                style={{ backgroundColor: `hsl(${(classId * 47) % 360}, 80%, 55%)` }}
+                                className="inline-block w-3 h-3 rounded"
+                            />
+                            <span className="text-gray-200">{COCO_CLASSES[classId]}</span>
+                            <span className="ml-auto text-gray-400">{count}</span>
+                        </div>
+                    ))}
                 </div>
             )}
         </div>
