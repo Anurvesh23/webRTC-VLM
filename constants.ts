@@ -8,7 +8,7 @@ export const ICE_SERVERS = {
 };
 
 // --- YOLOv5 CONSTANTS ---
-export const MODEL_PATH = '/models/yolov5n-quantized.onnx';
+export const MODEL_PATH = (import.meta as any).env?.VITE_MODEL_PATH || '/models/yolov5n-quantized.onnx';
 export const MODEL_WIDTH = 640;
 export const MODEL_HEIGHT = 640;
 export const CONFIDENCE_THRESHOLD = 0.45;
