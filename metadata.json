@@ -1,0 +1,8 @@
+
+{
+  "name": "Real-time WebRTC VLM Multi-Object Detection",
+  "description": "A React application that demonstrates real-time multi-object detection on a live video stream from a phone's browser to a desktop browser using WebRTC and in-browser WASM inference.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
