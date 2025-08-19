@@ -26,7 +26,8 @@ const DesktopView: React.FC = () => {
         setMode(modeParam);
         setStatus(`Mode: ${modeParam.toUpperCase()}. Waiting for phone to connect...`);
 
-        const phoneUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port}/#/phone`;
+        const portSegment = window.location.port ? `:${window.location.port}` : '';
+        const phoneUrl = `${window.location.protocol}//${window.location.hostname}${portSegment}/#/phone`;
         const qr = qrcode(0, 'L');
         qr.addData(phoneUrl);
         qr.make();
