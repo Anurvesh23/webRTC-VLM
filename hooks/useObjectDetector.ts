@@ -22,7 +22,14 @@ const useObjectDetector = (
         setModelError(null);
         try {
             ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
-            const modelResponse = await fetch(MODEL_PATH);
+            const modelResponse = await fetch(MODEL_PATH, { cache: 'no-store' });
+            if (!modelResponse.ok) {
+                throw new Error(`HTTP ${modelResponse.status} fetching ${MODEL_PATH}`);
+            }
+            const contentType = modelResponse.headers.get('content-type') || '';
+            if (contentType.includes('text/html')) {
+                throw new Error(`Expected binary model but received HTML (check that /models/yolov5n-quantized.onnx exists in public/)`);
+            }
             const modelBuffer = await modelResponse.arrayBuffer();
             const session = await ort.InferenceSession.create(modelBuffer);
             onnxSessionRef.current = session;
