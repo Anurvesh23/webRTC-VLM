@@ -107,6 +107,10 @@ const DesktopView: React.FC = () => {
             }
         };
 
+        // Ensure we request a video recv-only m-line so the phone can send us its camera track
+        try {
+            pc.addTransceiver('video', { direction: 'recvonly' });
+        } catch {}
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 

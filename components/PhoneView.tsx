@@ -46,6 +46,10 @@ const PhoneView: React.FC = () => {
                 pc.addTrack(track, localStreamRef.current!);
             });
         }
+
+        pc.onconnectionstatechange = () => {
+            setStatus(`Peer connection: ${pc.connectionState}`);
+        };
     }, []);
 
     useEffect(() => {
