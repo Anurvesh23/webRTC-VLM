@@ -269,19 +269,24 @@ const DesktopView: React.FC = () => {
 
             {/* Legend with multi-object counts */}
             {!showQr && detections.length > 0 && (
-                <div className="mt-4 w-full max-w-4xl grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                    {Array.from(
-                        (detections as DetectionBox[]).reduce<Map<number, number>>((map, d) => map.set(d.classId, (map.get(d.classId) || 0) + 1), new Map())
-                    ).slice(0, 8).map(([classId, count]) => (
-                        <div key={classId} className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded px-2 py-1">
-                            <span
-                                style={{ backgroundColor: `hsl(${(classId * 47) % 360}, 80%, 55%)` }}
-                                className="inline-block w-3 h-3 rounded"
-                            />
-                            <span className="text-gray-200">{COCO_CLASSES[classId]}</span>
-                            <span className="ml-auto text-gray-400">{count}</span>
-                        </div>
-                    ))}
+                <div className="mt-4 w-full max-w-md bg-gray-800 p-3 rounded-lg border border-gray-700">
+                    <h3 className="text-lg font-semibold text-white mb-2 text-center">Detected Objects</h3>
+                    <div className="flex flex-col space-y-1 text-sm">
+                        {Array.from(
+                            (detections as DetectionBox[]).reduce<Map<number, number>>((map, d) => map.set(d.classId, (map.get(d.classId) || 0) + 1), new Map())
+                        ).map(([classId, count]) => (
+                            <div key={classId} className="flex items-center justify-between gap-2 bg-gray-700 rounded px-3 py-1">
+                                <div className="flex items-center gap-2">
+                                    <span
+                                        style={{ backgroundColor: `hsl(${(classId * 47) % 360}, 80%, 55%)` }}
+                                        className="inline-block w-3 h-3 rounded-full"
+                                    />
+                                    <span className="text-gray-200 capitalize">{COCO_CLASSES[classId]}</span>
+                                </div>
+                                <span className="font-mono text-gray-300 bg-gray-600 px-2 rounded">{count}</span>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
         </div>
