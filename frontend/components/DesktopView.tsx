@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import qrcode from 'qrcode-generator';
 import useObjectDetector from '../hooks/useObjectDetector';
@@ -16,13 +16,14 @@ const DesktopView = () => {
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const metricsRef = useRef<Metrics>({ latencies: [], frameCount: 0, isBenchmarking: false, startTime: 0 });
 
-    const { detections, isLoadingModel, modelError } = useObjectDetector(videoRef, remoteStream !== null);
+    // Custom hook to handle the object detection logic
+    const { detections, isLoadingModel, modelError, metrics: detectionMetrics } = useObjectDetector(videoRef, remoteStream !== null);
 
-    // Main effect for setting up the signaling connection
+    // Main effect for setting up signaling and WebRTC connection
     useEffect(() => {
         setStatus('Mode: WASM. Waiting for phone to connect...');
 
-        // Generate QR Code
+        // Generate QR Code pointing to the /phone route
         const portSegment = window.location.port ? `:${window.location.port}` : '';
         const phoneUrl = `${window.location.protocol}//${window.location.hostname}${portSegment}/#/phone`;
         const qr = qrcode(0, 'L');
@@ -68,13 +69,13 @@ const DesktopView = () => {
                 await pc.setLocalDescription(offer);
                 socket.emit('offer', { from: socket.id, target: peerId, offer });
             } catch (error) {
-                console.error("Error creating offer:", error);
+                console.error("Error creating WebRTC offer:", error);
                 setStatus("Error: Failed to create WebRTC offer.");
             }
         };
 
         socket.on('connect', () => {
-            console.log('[desktop] connected to signaling server with id:', socket.id);
+            console.log('[desktop] Connected to signaling server with id:', socket.id);
             socket.emit('join');
         });
         
@@ -87,7 +88,7 @@ const DesktopView = () => {
             if (peerConnectionRef.current) {
                 try {
                     await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload.answer));
-                    console.log('[desktop] remote description set');
+                    console.log('[desktop] Remote description set');
                 } catch (error) {
                     console.error('Error setting remote description:', error);
                 }
@@ -100,6 +101,7 @@ const DesktopView = () => {
             }
         });
 
+        // Cleanup function to run when the component unmounts
         return () => {
             socket.disconnect();
             if (peerConnectionRef.current) {
@@ -118,7 +120,7 @@ const DesktopView = () => {
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Match canvas resolution to the video's display size
+        // Match canvas resolution to the video's display size for accurate overlay
         canvas.width = video.clientWidth;
         canvas.height = video.clientHeight;
 
@@ -150,46 +152,47 @@ const DesktopView = () => {
     
     // Effect to set up benchmarking functions on the window object
     useEffect(() => {
+        metricsRef.current = detectionMetrics; // Sync metrics from the detector hook
+        
         const startBenchmark = () => {
-            metricsRef.current = { latencies: [], frameCount: 0, isBenchmarking: true, startTime: performance.now() };
-            return "Benchmark started. Run window.stopBenchmark() after 30 seconds.";
+            if (detectionMetrics.startBenchmark) {
+                detectionMetrics.startBenchmark();
+                return "Benchmark started. Run window.stopBenchmark() after 30 seconds.";
+            }
+            return "Benchmark function not available.";
         };
 
         const stopBenchmark = () => {
-            if (!metricsRef.current.isBenchmarking) return "Benchmark not started.";
-            metricsRef.current.isBenchmarking = false;
-            const duration = (performance.now() - metricsRef.current.startTime) / 1000;
-            const fps = metricsRef.current.frameCount / duration;
-            const sortedLatencies = metricsRef.current.latencies.sort((a, b) => a - b);
-            const medianLatency = sortedLatencies[Math.floor(sortedLatencies.length / 2)] || 0;
-            const p95Latency = sortedLatencies[Math.floor(sortedLatencies.length * 0.95)] || 0;
+            if (detectionMetrics.stopBenchmark) {
+                const result = detectionMetrics.stopBenchmark();
+                
+                // Add placeholder bandwidth values to meet requirements
+                const finalResult = {
+                    ...result,
+                    uplink_kbps: "(use chrome://webrtc-internals)",
+                    downlink_kbps: "(use chrome://webrtc-internals)",
+                };
 
-            const result = {
-                median_e2e_latency_ms: parseFloat(medianLatency.toFixed(2)),
-                p95_e2e_latency_ms: parseFloat(p95Latency.toFixed(2)),
-                processed_fps: parseFloat(fps.toFixed(2)),
-                uplink_kbps: "(use webrtc-internals)",
-                downlink_kbps: "(use webrtc-internals)",
-            };
-            
-            const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'metrics.json';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            console.table(result);
-            return "Benchmark finished. metrics.json has been downloaded.";
+                const blob = new Blob([JSON.stringify(finalResult, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'metrics.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                console.table(finalResult);
+                return "Benchmark finished. metrics.json has been downloaded.";
+            }
+            return "Benchmark function not available.";
         };
 
         (window as any).startBenchmark = startBenchmark;
         (window as any).stopBenchmark = stopBenchmark;
 
-    }, []);
+    }, [detectionMetrics]);
 
     return (
         <div className="flex flex-col items-center justify-center min-h-screen p-4 md:p-8">
