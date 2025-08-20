@@ -17,7 +17,7 @@ const DesktopView: React.FC = () => {
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const metricsRef = useRef<Metrics>({ latencies: [], frameCount: 0, isBenchmarking: false, startTime: 0 });
 
-    const { detections, isLoadingModel, modelError } = useObjectDetector(videoRef, remoteStream !== null);
+    const { detections, isLoadingModel, modelError} = useObjectDetector(videoRef, mode === 'wasm' && remoteStream !== null);
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -116,6 +116,7 @@ const DesktopView: React.FC = () => {
             }
         };
 
+        // Ensure we request a video recv-only m-line so the phone can send us its camera track
         try {
             pc.addTransceiver('video', { direction: 'recvonly' });
         } catch {}
@@ -127,6 +128,7 @@ const DesktopView: React.FC = () => {
                 socketRef.current.emit('offer', { from: socketRef.current.id, target: peerId, offer });
             }
         } else {
+            // Server mode handshake
             try {
                 const response = await fetch(`${API_SERVER_URL}/offer`, {
                     method: 'POST',
@@ -143,6 +145,7 @@ const DesktopView: React.FC = () => {
     }, [mode]);
 
     const colorForClass = (classId: number): string => {
+        // Simple deterministic color palette based on classId
         const hue = (classId * 47) % 360;
         return `hsl(${hue}, 80%, 55%)`;
     };
@@ -185,6 +188,7 @@ const DesktopView: React.FC = () => {
         if (detections.length > 0) {
             drawDetections(detections);
         } else {
+            // Clear canvas if no detections
             const canvas = canvasRef.current;
              if(canvas) {
                 const ctx = canvas.getContext('2d');
@@ -196,6 +200,7 @@ const DesktopView: React.FC = () => {
     useEffect(() => {
         const startBenchmark = () => {
             metricsRef.current = { latencies: [], frameCount: 0, isBenchmarking: true, startTime: performance.now() };
+            console.log("--- BENCHMARK STARTED ---");
             return "Benchmark started. Run window.stopBenchmark() after 30 seconds.";
         };
 
@@ -224,6 +229,7 @@ const DesktopView: React.FC = () => {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             
+            console.log("--- BENCHMARK FINISHED ---");
             console.table(result);
             return "Benchmark finished. metrics.json has been downloaded.";
         };
@@ -258,25 +264,38 @@ const DesktopView: React.FC = () => {
                 </div>
             )}
 
+            {/* Debug Controls */}
+            {!showQr && (
+                <div className="mt-4 w-full max-w-4xl flex gap-4 justify-center">
+                    <button 
+                        onClick={() => {
+                            console.log('[DEBUG] Manual test - Current detections:', detections);
+                            console.log('[DEBUG] Video element:', videoRef.current);
+                            console.log('[DEBUG] Video dimensions:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight);
+                            console.log('[DEBUG] Remote stream:', remoteStream);
+                        }}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm"
+                    >
+                        Debug Info
+                    </button>
+                </div>
+            )}
+
+            {/* Legend with multi-object counts */}
             {!showQr && detections.length > 0 && (
-                <div className="mt-4 w-full max-w-md bg-gray-800 p-3 rounded-lg border border-gray-700">
-                    <h3 className="text-lg font-semibold text-white mb-2 text-center">Detected Objects</h3>
-                    <div className="flex flex-col space-y-1 text-sm">
-                        {Array.from(
-                            (detections as DetectionBox[]).reduce<Map<number, number>>((map, d) => map.set(d.classId, (map.get(d.classId) || 0) + 1), new Map())
-                        ).map(([classId, count]) => (
-                            <div key={classId} className="flex items-center justify-between gap-2 bg-gray-700 rounded px-3 py-1">
-                                <div className="flex items-center gap-2">
-                                    <span
-                                        style={{ backgroundColor: `hsl(${(classId * 47) % 360}, 80%, 55%)` }}
-                                        className="inline-block w-3 h-3 rounded-full"
-                                    />
-                                    <span className="text-gray-200 capitalize">{COCO_CLASSES[classId]}</span>
-                                </div>
-                                <span className="font-mono text-gray-300 bg-gray-600 px-2 rounded">{count}</span>
-                            </div>
-                        ))}
-                    </div>
+                <div className="mt-4 w-full max-w-4xl grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                    {Array.from(
+                        (detections as DetectionBox[]).reduce<Map<number, number>>((map, d) => map.set(d.classId, (map.get(d.classId) || 0) + 1), new Map())
+                    ).slice(0, 8).map(([classId, count]) => (
+                        <div key={classId} className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded px-2 py-1">
+                            <span
+                                style={{ backgroundColor: `hsl(${(classId * 47) % 360}, 80%, 55%)` }}
+                                className="inline-block w-3 h-3 rounded"
+                            />
+                            <span className="text-gray-200">{COCO_CLASSES[classId]}</span>
+                            <span className="ml-auto text-gray-400">{count}</span>
+                        </div>
+                    ))}
                 </div>
             )}
         </div>
