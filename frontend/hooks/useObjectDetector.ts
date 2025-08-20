@@ -1,212 +1,123 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import * as ort from 'onnxruntime-web';
-import { MODEL_PATH, MODEL_WIDTH, MODEL_HEIGHT, CONFIDENCE_THRESHOLD, NMS_IOU_THRESHOLD } from '../constants';
-import type { DetectionBox } from '../types';
+import { InferenceSession, Tensor } from 'onnxruntime-web';
+import { DetectionBox, ExtendedMetrics } from '../types';
+import { preprocess, postprocess } from '../utils/yolo';
 
-const useObjectDetector = (
-    videoRef: React.RefObject<HTMLVideoElement>,
-    enabled: boolean
-) => {
+const useObjectDetector = (videoRef: React.RefObject<HTMLVideoElement>, isStreamActive: boolean) => {
     const [detections, setDetections] = useState<DetectionBox[]>([]);
-    const [isLoadingModel, setIsLoadingModel] = useState(false);
+    const [isLoadingModel, setIsLoadingModel] = useState(true);
     const [modelError, setModelError] = useState<string | null>(null);
+    const [metrics, setMetrics] = useState<ExtendedMetrics>({
+        latencies: [],
+        frameCount: 0,
+        isBenchmarking: false,
+        startTime: 0,
+        fps: 0,
+        p95Latency: 0,
+        medianLatency: 0,
+        totalFrames: 0, // New metric
+        startBenchmark: () => {},
+        stopBenchmark: () => ({ median_e2e_latency_ms: 0, p95_e2e_latency_ms: 0, processed_fps: 0 }),
+    });
 
-    const onnxSessionRef = useRef<ort.InferenceSession | null>(null);
+    const sessionRef = useRef<InferenceSession | null>(null);
     const isProcessingRef = useRef(false);
-    const latestFrameRef = useRef<ImageData | null>(null);
-    const animationFrameId = useRef<number>();
-
-    const loadModel = useCallback(async () => {
-        if (!enabled || onnxSessionRef.current) return;
-        setIsLoadingModel(true);
-        setModelError(null);
-        
-        try {
-            ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
-            const modelResponse = await fetch(MODEL_PATH, { cache: 'no-store' });
-            if (!modelResponse.ok) {
-                throw new Error(`HTTP ${modelResponse.status} fetching ${MODEL_PATH}`);
-            }
-            const contentType = modelResponse.headers.get('content-type') || '';
-            if (contentType.includes('text/html')) {
-                throw new Error(`Expected binary model but received HTML. Check if /models/yolov5n-quantized.onnx exists in the public directory.`);
-            }
-            const modelBuffer = await modelResponse.arrayBuffer();
-            const session = await ort.InferenceSession.create(modelBuffer);
-            onnxSessionRef.current = session;
-        } catch (e) {
-            console.error('Failed to load ONNX model:', e);
-            setModelError(`Error: Failed to load model. ${(e as Error).message}`);
-        }
-        setIsLoadingModel(false);
-    }, [enabled]);
+    const frameCountRef = useRef(0);
+    const secondTimerRef = useRef(Date.now());
+    const latenciesRef = useRef<number[]>([]);
 
     useEffect(() => {
+        const loadModel = async () => {
+            try {
+                ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+                const newSession = await InferenceSession.create('/models/yolov5n-quantized.onnx');
+                sessionRef.current = newSession;
+                setIsLoadingModel(false);
+            } catch (error) {
+                console.error("Error loading ONNX model:", error);
+                setModelError("Failed to load model.");
+                setIsLoadingModel(false);
+            }
+        };
         loadModel();
-    }, [loadModel]);
-
-    const preprocess = useCallback((imageData: ImageData): ort.Tensor => {
-        const { width, height } = imageData;
-        
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = MODEL_WIDTH;
-        tempCanvas.height = MODEL_HEIGHT;
-        const tempCtx = tempCanvas.getContext('2d')!;
-        
-        const tempImgCanvas = document.createElement('canvas');
-        tempImgCanvas.width = width;
-        tempImgCanvas.height = height;
-        tempImgCanvas.getContext('2d')!.putImageData(imageData, 0, 0);
-        
-        tempCtx.drawImage(tempImgCanvas, 0, 0, MODEL_WIDTH, MODEL_HEIGHT);
-        const resizedImageData = tempCtx.getImageData(0, 0, MODEL_WIDTH, MODEL_HEIGHT);
-    
-        const float32Data = new Float32Array(3 * MODEL_WIDTH * MODEL_HEIGHT);
-        for (let i = 0; i < resizedImageData.data.length; i += 4) {
-            const j = i / 4;
-            float32Data[j] = resizedImageData.data[i] / 255.0;
-            float32Data[MODEL_WIDTH * MODEL_HEIGHT + j] = resizedImageData.data[i + 1] / 255.0;
-            float32Data[2 * MODEL_WIDTH * MODEL_HEIGHT + j] = resizedImageData.data[i + 2] / 255.0;
-        }
-        
-        return new ort.Tensor('float32', float32Data, [1, 3, MODEL_HEIGHT, MODEL_WIDTH]);
-    }, []);
-    
-    const postprocess = useCallback((output: Float32Array): DetectionBox[] => {
-        const boxes: DetectionBox[] = [];
-        const numClasses = 80;
-        const numProposals = 25200;
-        const boxStride = numClasses + 5;
-        
-        if (output.length !== numProposals * boxStride) {
-            console.warn(`Unexpected output length: ${output.length}, expected: ${numProposals * boxStride}`);
-            return [];
-        }
-    
-        for (let i = 0; i < numProposals; i++) {
-            const offset = i * boxStride;
-            const confidence = output[offset + 4];
-            
-            if (confidence < CONFIDENCE_THRESHOLD) continue;
-    
-            let maxProb = 0;
-            let classId = 0;
-            for (let j = 0; j < numClasses; j++) {
-                const classProb = output[offset + 5 + j];
-                if (classProb > maxProb) {
-                    maxProb = classProb;
-                    classId = j;
-                }
-            }
-    
-            const finalScore = maxProb * confidence;
-            if (finalScore > CONFIDENCE_THRESHOLD) {
-                const centerX = output[offset];
-                const centerY = output[offset + 1];
-                const width = output[offset + 2];
-                const height = output[offset + 3];
-    
-                boxes.push({
-                    x: centerX - width / 2, y: centerY - height / 2, w: width, h: height,
-                    score: finalScore, classId,
-                });
-            }
-        }
-        
-        return nonMaxSuppression(boxes);
     }, []);
 
-    const nonMaxSuppression = (boxes: DetectionBox[]): DetectionBox[] => {
-        const sortedBoxes = boxes.sort((a, b) => b.score - a.score);
-        const result: DetectionBox[] = [];
-        while (sortedBoxes.length > 0) {
-            result.push(sortedBoxes[0]);
-            const current = sortedBoxes.shift()!;
-            for (let i = sortedBoxes.length - 1; i >= 0; i--) {
-                const iou = calculateIoU(current, sortedBoxes[i]);
-                if (iou > NMS_IOU_THRESHOLD) {
-                    sortedBoxes.splice(i, 1);
-                }
-            }
-        }
-        return result;
-    };
-    
-    const calculateIoU = (box1: DetectionBox, box2: DetectionBox): number => {
-        const x1 = Math.max(box1.x, box2.x);
-        const y1 = Math.max(box1.y, box2.y);
-        const x2 = Math.min(box1.x + box1.w, box2.x + box2.w);
-        const y2 = Math.min(box1.y + box1.h, box2.y + box2.h);
-        const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-        const union = box1.w * box1.h + box2.w * box2.h - intersection;
-        return intersection / union;
-    };
-    
-    const runDetectionLoop = useCallback(async () => {
-        if (!onnxSessionRef.current || isProcessingRef.current || !latestFrameRef.current) {
-            animationFrameId.current = requestAnimationFrame(runDetectionLoop);
-            return;
-        }
-        
-        isProcessingRef.current = true;
-        const currentFrame = latestFrameRef.current;
-        latestFrameRef.current = null;
-    
-        try {
-            const inputTensor = preprocess(currentFrame);
-            const inputName = onnxSessionRef.current.inputNames[0];
-            const feeds = { [inputName]: inputTensor };
-            const results = await onnxSessionRef.current.run(feeds);
-            
-            const newDetections = postprocess(results.output.data as Float32Array);
-            setDetections(newDetections);
-
-        } catch(e) {
-            console.error('Detection error:', e);
-        }
-        
-        isProcessingRef.current = false;
-        animationFrameId.current = requestAnimationFrame(runDetectionLoop);
-    }, [preprocess, postprocess]);
-    
     useEffect(() => {
-        const video = videoRef.current;
-        if (!enabled || !video) {
-            return;
-        }
-
-        let frameCaptureId: number;
-        const tempCanvas = document.createElement('canvas');
-        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
-        
-        const captureFrame = () => {
-            if (video.paused || video.ended) {
-                frameCaptureId = requestAnimationFrame(captureFrame);
+        const detectObjects = async () => {
+            if (
+                !isStreamActive ||
+                isProcessingRef.current ||
+                !sessionRef.current ||
+                !videoRef.current ||
+                videoRef.current.readyState < 3
+            ) {
+                requestAnimationFrame(detectObjects);
                 return;
             }
-            if (tempCtx && video.videoWidth > 0) {
-                tempCanvas.width = video.videoWidth;
-                tempCanvas.height = video.videoHeight;
-                tempCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
-                latestFrameRef.current = tempCtx.getImageData(0, 0, video.videoWidth, video.videoHeight);
+
+            isProcessingRef.current = true;
+            const startTime = performance.now();
+
+            const video = videoRef.current;
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+            const tempCtx = tempCanvas.getContext('2d');
+            if (!tempCtx) {
+                isProcessingRef.current = false;
+                requestAnimationFrame(detectObjects);
+                return;
             }
-            frameCaptureId = requestAnimationFrame(captureFrame);
+            tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+            const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+
+            const inputTensor = preprocess(imageData);
+            const feeds: Record<string, Tensor> = {};
+            feeds[sessionRef.current.inputNames[0]] = inputTensor;
+
+            try {
+                const results = await sessionRef.current.run(feeds);
+                const outputTensor = results[sessionRef.current.outputNames[0]];
+                const newDetections = postprocess(outputTensor);
+                setDetections(newDetections);
+                
+                const latency = performance.now() - startTime;
+                latenciesRef.current.push(latency);
+                if (latenciesRef.current.length > 100) {
+                    latenciesRef.current.shift(); // Keep last 100 latencies
+                }
+
+                frameCountRef.current++;
+                if (Date.now() - secondTimerRef.current > 1000) {
+                    const sortedLatencies = [...latenciesRef.current].sort((a, b) => a - b);
+                    
+                    setMetrics(prev => ({
+                        ...prev,
+                        fps: frameCountRef.current,
+                        p95Latency: sortedLatencies[Math.floor(sortedLatencies.length * 0.95)] || 0,
+                        medianLatency: sortedLatencies[Math.floor(sortedLatencies.length * 0.5)] || 0,
+                        totalFrames: prev.totalFrames + frameCountRef.current,
+                    }));
+
+                    frameCountRef.current = 0;
+                    secondTimerRef.current = Date.now();
+                }
+
+            } catch (error) {
+                console.error("Inference failed:", error);
+            }
+
+            isProcessingRef.current = false;
+            requestAnimationFrame(detectObjects);
+        };
+
+        if (isStreamActive && !isLoadingModel) {
+            detectObjects();
         }
+    }, [isStreamActive, isLoadingModel, videoRef]);
 
-        const onPlay = () => {
-            frameCaptureId = requestAnimationFrame(captureFrame);
-            animationFrameId.current = requestAnimationFrame(runDetectionLoop);
-        };
-        video.addEventListener('play', onPlay);
-
-        return () => {
-            video.removeEventListener('play', onPlay);
-            if (frameCaptureId) cancelAnimationFrame(frameCaptureId);
-            if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
-        };
-    }, [enabled, videoRef, runDetectionLoop]);
-
-    return { detections, isLoadingModel, modelError };
+    return { detections, isLoadingModel, modelError, metrics };
 };
 
 export default useObjectDetector;
