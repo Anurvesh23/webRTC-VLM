@@ -16,14 +16,11 @@ const DesktopView = () => {
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const metricsRef = useRef<Metrics>({ latencies: [], frameCount: 0, isBenchmarking: false, startTime: 0 });
 
-    // Custom hook to handle the object detection logic
     const { detections, isLoadingModel, modelError, metrics: detectionMetrics } = useObjectDetector(videoRef, remoteStream !== null);
 
     // Main effect for setting up signaling and WebRTC connection
     useEffect(() => {
         setStatus('Mode: WASM. Waiting for phone to connect...');
-
-        // Generate QR Code pointing to the /phone route
         const portSegment = window.location.port ? `:${window.location.port}` : '';
         const phoneUrl = `${window.location.protocol}//${window.location.hostname}${portSegment}/#/phone`;
         const qr = qrcode(0, 'L');
@@ -34,12 +31,11 @@ const DesktopView = () => {
             qrElement.innerHTML = qr.createImgTag(5, 5);
         }
 
-        // Setup WebSocket for signaling
         const socket = io(SIGNALING_SERVER_URL, { transports: ['websocket'] });
         socketRef.current = socket;
 
         const createPeerConnection = async (peerId: string) => {
-            if (peerConnectionRef.current) return; // Avoid creating multiple connections
+            if (peerConnectionRef.current) return;
 
             const pc = new RTCPeerConnection(ICE_SERVERS);
             peerConnectionRef.current = pc;
@@ -88,7 +84,6 @@ const DesktopView = () => {
             if (peerConnectionRef.current) {
                 try {
                     await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload.answer));
-                    console.log('[desktop] Remote description set');
                 } catch (error) {
                     console.error('Error setting remote description:', error);
                 }
@@ -101,7 +96,6 @@ const DesktopView = () => {
             }
         });
 
-        // Cleanup function to run when the component unmounts
         return () => {
             socket.disconnect();
             if (peerConnectionRef.current) {
@@ -120,16 +114,13 @@ const DesktopView = () => {
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Match canvas resolution to the video's display size for accurate overlay
         canvas.width = video.clientWidth;
         canvas.height = video.clientHeight;
-
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         detections.forEach(det => {
             const { x, y, w, h, score, classId } = det;
             const color = `hsl(${(classId * 47) % 360}, 80%, 55%)`;
-
             const rectX = (x / MODEL_WIDTH) * canvas.width;
             const rectY = (y / MODEL_HEIGHT) * canvas.height;
             const rectWidth = (w / MODEL_WIDTH) * canvas.width;
@@ -144,16 +135,14 @@ const DesktopView = () => {
             ctx.font = '16px sans-serif';
             const textWidth = ctx.measureText(label).width;
             ctx.fillRect(rectX, rectY > 20 ? rectY - 22 : rectY, textWidth + 8, 22);
-            
             ctx.fillStyle = '#000000';
             ctx.fillText(label, rectX + 4, rectY > 20 ? rectY - 5 : rectY + 16);
         });
     }, [detections]);
     
-    // Effect to set up benchmarking functions on the window object
+    // Effect to set up benchmarking functions
     useEffect(() => {
-        metricsRef.current = detectionMetrics; // Sync metrics from the detector hook
-        
+        metricsRef.current = detectionMetrics;
         const startBenchmark = () => {
             if (detectionMetrics.startBenchmark) {
                 detectionMetrics.startBenchmark();
@@ -165,14 +154,11 @@ const DesktopView = () => {
         const stopBenchmark = () => {
             if (detectionMetrics.stopBenchmark) {
                 const result = detectionMetrics.stopBenchmark();
-                
-                // Add placeholder bandwidth values to meet requirements
                 const finalResult = {
                     ...result,
                     uplink_kbps: "(use chrome://webrtc-internals)",
                     downlink_kbps: "(use chrome://webrtc-internals)",
                 };
-
                 const blob = new Blob([JSON.stringify(finalResult, null, 2)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -182,7 +168,6 @@ const DesktopView = () => {
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-                
                 console.table(finalResult);
                 return "Benchmark finished. metrics.json has been downloaded.";
             }
@@ -191,7 +176,6 @@ const DesktopView = () => {
 
         (window as any).startBenchmark = startBenchmark;
         (window as any).stopBenchmark = stopBenchmark;
-
     }, [detectionMetrics]);
 
     return (
@@ -210,6 +194,21 @@ const DesktopView = () => {
                     <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
                 </div>
             </div>
+
+            {/* --- THIS IS THE NEW METRICS SECTION --- */}
+            {!showQr && (
+                <div className="mt-4 w-full max-w-4xl bg-gray-800 p-3 rounded-lg border border-gray-700 flex justify-around text-center">
+                    <div className="text-white">
+                        <p className="text-sm text-gray-400">Inference Speed</p>
+                        <p className="text-2xl font-mono">{detectionMetrics.fps ? detectionMetrics.fps.toFixed(1) : '0.0'} FPS</p>
+                    </div>
+                    <div className="text-white">
+                        <p className="text-sm text-gray-400">E2E Latency (p95)</p>
+                        <p className="text-2xl font-mono">{detectionMetrics.p95Latency ? detectionMetrics.p95Latency.toFixed(0) : '0'} ms</p>
+                    </div>
+                </div>
+            )}
+            {/* --- END OF NEW METRICS SECTION --- */}
 
             {showQr && (
                 <div className="mt-8 p-6 bg-white rounded-lg shadow-lg text-center text-gray-800 flex flex-col items-center">
