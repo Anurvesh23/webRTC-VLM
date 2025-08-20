@@ -267,23 +267,6 @@ const DesktopView: React.FC = () => {
                 </div>
             )}
 
-            {/* Debug Controls */}
-            {!showQr && (
-                <div className="mt-4 w-full max-w-4xl flex gap-4 justify-center">
-                    <button 
-                        onClick={() => {
-                            console.log('[DEBUG] Manual test - Current detections:', detections);
-                            console.log('[DEBUG] Video element:', videoRef.current);
-                            console.log('[DEBUG] Video dimensions:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight);
-                            console.log('[DEBUG] Remote stream:', remoteStream);
-                        }}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm"
-                    >
-                        Debug Info
-                    </button>
-                </div>
-            )}
-
             {/* Legend with multi-object counts */}
             {!showQr && detections.length > 0 && (
                 <div className="mt-4 w-full max-w-4xl grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
