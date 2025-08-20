@@ -10,7 +10,7 @@ const App = () => {
       <HashRouter>
         <Routes>
           <Route path="/" element={<DesktopView />} />
-          <Route path="/phone" element={<PhoneView />} />
+          <Route path="/phone/:peerId" element={<PhoneView />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </HashRouter>
