@@ -17,7 +17,7 @@ const DesktopView: React.FC = () => {
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const metricsRef = useRef<Metrics>({ latencies: [], frameCount: 0, isBenchmarking: false, startTime: 0 });
 
-    const { detections, isLoadingModel, modelError} = useObjectDetector(videoRef, mode === 'wasm' && remoteStream !== null);
+    const { detections, isLoadingModel, modelError } = useObjectDetector(videoRef, remoteStream !== null);
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
