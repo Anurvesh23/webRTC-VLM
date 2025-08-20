@@ -2,12 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import qrcode from 'qrcode-generator';
 import useObjectDetector from '../hooks/useObjectDetector';
-import { SIGNALING_SERVER_URL, API_SERVER_URL, ICE_SERVERS, COCO_CLASSES, MODEL_WIDTH, MODEL_HEIGHT } from '../constants';
+import { SIGNALING_SERVER_URL, ICE_SERVERS, COCO_CLASSES, MODEL_WIDTH, MODEL_HEIGHT } from '../constants';
 import type { DetectionBox, Metrics } from '../types';
 
 const DesktopView = () => {
     const [status, setStatus] = useState('Initializing...');
-    const [mode, setMode] = useState('wasm');
     const [showQr, setShowQr] = useState(true);
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
@@ -19,12 +18,11 @@ const DesktopView = () => {
 
     const { detections, isLoadingModel, modelError } = useObjectDetector(videoRef, remoteStream !== null);
 
+    // Main effect for setting up the signaling connection
     useEffect(() => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const modeParam = urlParams.get('mode') || 'wasm';
-        setMode(modeParam);
-        setStatus(`Mode: ${modeParam.toUpperCase()}. Waiting for phone to connect...`);
+        setStatus('Mode: WASM. Waiting for phone to connect...');
 
+        // Generate QR Code
         const portSegment = window.location.port ? `:${window.location.port}` : '';
         const phoneUrl = `${window.location.protocol}//${window.location.hostname}${portSegment}/#/phone`;
         const qr = qrcode(0, 'L');
@@ -34,25 +32,52 @@ const DesktopView = () => {
         if (qrElement) {
             qrElement.innerHTML = qr.createImgTag(5, 5);
         }
-    }, []);
 
-    const setupSignaling = useCallback(() => {
-        const socket = io(SIGNALING_SERVER_URL, { transports: ['websocket', 'polling'] });
+        // Setup WebSocket for signaling
+        const socket = io(SIGNALING_SERVER_URL, { transports: ['websocket'] });
         socketRef.current = socket;
 
+        const createPeerConnection = async (peerId: string) => {
+            if (peerConnectionRef.current) return; // Avoid creating multiple connections
+
+            const pc = new RTCPeerConnection(ICE_SERVERS);
+            peerConnectionRef.current = pc;
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate && socketRef.current) {
+                    socketRef.current.emit('ice-candidate', { target: peerId, candidate: event.candidate });
+                }
+            };
+
+            pc.oniceconnectionstatechange = () => setStatus(`ICE State: ${pc.iceConnectionState}`);
+
+            pc.ontrack = (event) => {
+                if (event.streams && event.streams[0]) {
+                    setRemoteStream(event.streams[0]);
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = event.streams[0];
+                    }
+                    setStatus('Video stream connected!');
+                    setShowQr(false);
+                }
+            };
+
+            try {
+                pc.addTransceiver('video', { direction: 'recvonly' });
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                socket.emit('offer', { from: socket.id, target: peerId, offer });
+            } catch (error) {
+                console.error("Error creating offer:", error);
+                setStatus("Error: Failed to create WebRTC offer.");
+            }
+        };
+
         socket.on('connect', () => {
-            console.log('[desktop] connected to signaling', SIGNALING_SERVER_URL, 'id=', socket.id);
+            console.log('[desktop] connected to signaling server with id:', socket.id);
             socket.emit('join');
         });
-
-        socket.on('existing-peers', (peers: string[]) => {
-            if (peers.length > 0) {
-                console.log('[desktop] existing-peers', peers);
-                setStatus('Phone detected! Creating WebRTC connection...');
-                createPeerConnection(peers[0]);
-            }
-        });
-
+        
         socket.on('user-joined', (peerId: string) => {
             setStatus('Phone detected! Creating WebRTC connection...');
             createPeerConnection(peerId);
@@ -77,101 +102,43 @@ const DesktopView = () => {
 
         return () => {
             socket.disconnect();
+            if (peerConnectionRef.current) {
+                peerConnectionRef.current.close();
+                peerConnectionRef.current = null;
+            }
         };
-    }, [mode]);
+    }, []);
 
+    // Effect for drawing detections onto the canvas
     useEffect(() => {
-        const cleanup = setupSignaling();
-        return cleanup;
-    }, [setupSignaling]);
-
-    const createPeerConnection = useCallback(async (peerId: string) => {
-        const pc = new RTCPeerConnection(ICE_SERVERS);
-        peerConnectionRef.current = pc;
-
-        pc.onicecandidate = (event) => {
-            if (event.candidate && socketRef.current) {
-                socketRef.current.emit('ice-candidate', { target: peerId, candidate: event.candidate });
-            }
-        };
-
-        pc.oniceconnectionstatechange = () => {
-            console.log('[desktop] iceConnectionState:', pc.iceConnectionState);
-            setStatus(`ICE: ${pc.iceConnectionState}`);
-        };
-
-        pc.onconnectionstatechange = () => {
-            console.log('[desktop] connectionState:', pc.connectionState);
-        };
-
-        pc.ontrack = (event) => {
-            if (event.streams && event.streams[0]) {
-                setRemoteStream(event.streams[0]);
-                if (videoRef.current) {
-                    videoRef.current.srcObject = event.streams[0];
-                    videoRef.current.play?.().catch((e) => console.warn('[desktop] video play blocked:', e));
-                }
-                setStatus('Video stream connected!');
-                setShowQr(false);
-            }
-        };
-
-        try {
-            pc.addTransceiver('video', { direction: 'recvonly' });
-        } catch {}
-        const offer = await pc.createOffer({ offerToReceiveVideo: true });
-        await pc.setLocalDescription(offer);
-
-        if (mode === 'wasm') {
-            if (socketRef.current) {
-                socketRef.current.emit('offer', { from: socketRef.current.id, target: peerId, offer });
-            }
-        } else {
-            try {
-                const response = await fetch(`${API_SERVER_URL}/offer`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sdp: offer.sdp, type: offer.type })
-                });
-                const answer = await response.json();
-                await pc.setRemoteDescription(new RTCSessionDescription(answer));
-            } catch (error) {
-                console.error("Server mode handshake failed:", error);
-                setStatus("Error: Failed to connect to server.");
-            }
-        }
-    }, [mode]);
-
-    const colorForClass = (classId: number): string => {
-        const hue = (classId * 47) % 360;
-        return `hsl(${hue}, 80%, 55%)`;
-    };
-
-    const drawDetections = useCallback((detectionsToDraw: DetectionBox[]) => {
         const canvas = canvasRef.current;
         const video = videoRef.current;
-        if (!canvas || !video) return;
+        if (!canvas || !video || !detections) return;
 
-        canvas.width = video.clientWidth;
-        canvas.height = video.clientHeight;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
+        // Match canvas resolution to the video's display size
+        canvas.width = video.clientWidth;
+        canvas.height = video.clientHeight;
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        detectionsToDraw.forEach(det => {
+        detections.forEach(det => {
             const { x, y, w, h, score, classId } = det;
+            const color = `hsl(${(classId * 47) % 360}, 80%, 55%)`;
+
             const rectX = (x / MODEL_WIDTH) * canvas.width;
             const rectY = (y / MODEL_HEIGHT) * canvas.height;
             const rectWidth = (w / MODEL_WIDTH) * canvas.width;
             const rectHeight = (h / MODEL_HEIGHT) * canvas.height;
 
-            ctx.strokeStyle = colorForClass(classId);
+            ctx.strokeStyle = color;
             ctx.lineWidth = 3;
             ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
 
             const label = `${COCO_CLASSES[classId]}: ${score.toFixed(2)}`;
-            ctx.fillStyle = colorForClass(classId);
+            ctx.fillStyle = color;
             ctx.font = '16px sans-serif';
             const textWidth = ctx.measureText(label).width;
             ctx.fillRect(rectX, rectY > 20 ? rectY - 22 : rectY, textWidth + 8, 22);
@@ -179,20 +146,9 @@ const DesktopView = () => {
             ctx.fillStyle = '#000000';
             ctx.fillText(label, rectX + 4, rectY > 20 ? rectY - 5 : rectY + 16);
         });
-    }, []);
-
-    useEffect(() => {
-        if (detections.length > 0) {
-            drawDetections(detections);
-        } else {
-            const canvas = canvasRef.current;
-             if(canvas) {
-                const ctx = canvas.getContext('2d');
-                if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-             }
-        }
-    }, [detections, drawDetections]);
+    }, [detections]);
     
+    // Effect to set up benchmarking functions on the window object
     useEffect(() => {
         const startBenchmark = () => {
             metricsRef.current = { latencies: [], frameCount: 0, isBenchmarking: true, startTime: performance.now() };
@@ -212,6 +168,8 @@ const DesktopView = () => {
                 median_e2e_latency_ms: parseFloat(medianLatency.toFixed(2)),
                 p95_e2e_latency_ms: parseFloat(p95Latency.toFixed(2)),
                 processed_fps: parseFloat(fps.toFixed(2)),
+                uplink_kbps: "(use webrtc-internals)",
+                downlink_kbps: "(use webrtc-internals)",
             };
             
             const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
@@ -232,7 +190,6 @@ const DesktopView = () => {
         (window as any).stopBenchmark = stopBenchmark;
 
     }, []);
-
 
     return (
         <div className="flex flex-col items-center justify-center min-h-screen p-4 md:p-8">
@@ -263,7 +220,7 @@ const DesktopView = () => {
                     <h3 className="text-lg font-semibold text-white mb-2 text-center">Detected Objects</h3>
                     <div className="flex flex-col space-y-1 text-sm">
                         {Array.from(
-                            (detections as DetectionBox[]).reduce<Map<number, number>>((map, d) => map.set(d.classId, (map.get(d.classId) || 0) + 1), new Map())
+                            detections.reduce<Map<number, number>>((map, d) => map.set(d.classId, (map.get(d.classId) || 0) + 1), new Map())
                         ).map(([classId, count]) => (
                             <div key={classId} className="flex items-center justify-between gap-2 bg-gray-700 rounded px-3 py-1">
                                 <div className="flex items-center gap-2">
