@@ -1,90 +1,29 @@
-
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { SIGNALING_SERVER_URL, ICE_SERVERS } from '../constants';
 
 const PhoneView: React.FC = () => {
     const [status, setStatus] = useState('Initializing...');
-    const localVideoRef = useRef<HTMLVideoElement>(null);
+    const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+    
+    const videoRef = useRef<HTMLVideoElement>(null);
     const socketRef = useRef<Socket | null>(null);
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
-    
-    const startCamera = useCallback(async () => {
-        if (!(navigator.mediaDevices && (navigator.mediaDevices as any).getUserMedia)) {
-            setStatus('Camera API unavailable. On iOS this requires opening the page over HTTPS (trusted certificate).');
-            return;
-        }
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment', width: 1280, height: 720 },
-                audio: false
-            });
-            localStreamRef.current = stream;
-            if (localVideoRef.current) {
-                localVideoRef.current.srcObject = stream;
-            }
-            setStatus('Camera active. Waiting for desktop connection.');
-        } catch (err) {
-            console.error('Error accessing camera:', err);
-            setStatus(`Error accessing camera: ${(err as Error).message}`);
-        }
-    }, []);
 
-    const createPeerConnection = useCallback((peerId: string) => {
-        const pc = new RTCPeerConnection(ICE_SERVERS);
-        peerConnectionRef.current = pc;
-
-        pc.onicecandidate = (event) => {
-            if (event.candidate && socketRef.current) {
-                socketRef.current.emit('ice-candidate', { target: peerId, candidate: event.candidate });
-            }
-        };
-
-        if (localStreamRef.current) {
-            localStreamRef.current.getTracks().forEach(track => {
-                pc.addTrack(track, localStreamRef.current!);
-            });
-        }
-
-        pc.onconnectionstatechange = () => {
-            setStatus(`Peer connection: ${pc.connectionState}`);
-        };
-    }, []);
-
-    useEffect(() => {
-        startCamera();
-
+    const setupSignaling = useCallback(() => {
         const socket = io(SIGNALING_SERVER_URL, { transports: ['websocket', 'polling'] });
         socketRef.current = socket;
 
         socket.on('connect', () => {
-            setStatus('Connected to signaling server.');
-            socket.emit('join');
             console.log('[phone] connected to signaling', SIGNALING_SERVER_URL, 'id=', socket.id);
+            setStatus('Connected to server. Waiting for desktop...');
+            socket.emit('join');
         });
 
-        socket.on('user-joined', (peerId: string) => {
-            setStatus('Desktop detected. Ready to answer.');
-        });
-
-        socket.on('offer', async (payload: { from: string; offer: RTCSessionDescriptionInit }) => {
-            setStatus('Received offer, creating answer...');
-            createPeerConnection(payload.from);
-            
-            if (!peerConnectionRef.current) return;
-
-            try {
-                await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload.offer));
-                const answer = await peerConnectionRef.current.createAnswer();
-                await peerConnectionRef.current.setLocalDescription(answer);
-                
-                socket.emit('answer', { target: payload.from, answer: answer });
-                setStatus('Streaming video to desktop.');
-            } catch (error) {
-                console.error("Failed to create answer:", error);
-                setStatus("Error: Failed to establish WebRTC connection.");
-            }
+        socket.on('offer', async (payload: { offer: RTCSessionDescriptionInit; from: string }) => {
+            setStatus('Desktop detected! Creating connection...');
+            createPeerConnection(payload.from, payload.offer);
         });
 
         socket.on('ice-candidate', (payload: { candidate: RTCIceCandidateInit }) => {
@@ -93,34 +32,117 @@ const PhoneView: React.FC = () => {
             }
         });
 
-        socket.on('user-left', (peerId: string) => {
-            setStatus('Desktop left. Waiting for reconnection.');
-        });
-
         return () => {
             socket.disconnect();
+        };
+    }, []);
+
+    const startCamera = useCallback(async (mode: 'user' | 'environment') => {
+        try {
             if (localStreamRef.current) {
                 localStreamRef.current.getTracks().forEach(track => track.stop());
             }
-            if(peerConnectionRef.current) {
-                peerConnectionRef.current.close();
+
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: mode }
+            });
+
+            localStreamRef.current = stream;
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+                 videoRef.current.play().catch(e => console.error("Local video play failed:", e));
+            }
+            return stream;
+        } catch (error) {
+            console.error('Error accessing camera:', error);
+            setStatus('Error: Could not access camera.');
+            return null;
+        }
+    }, []);
+
+
+    useEffect(() => {
+        startCamera(facingMode).then(stream => {
+            if (stream) {
+                 const cleanup = setupSignaling();
+                 return cleanup;
+            }
+        });
+
+        return () => {
+            localStreamRef.current?.getTracks().forEach(track => track.stop());
+            socketRef.current?.disconnect();
+            peerConnectionRef.current?.close();
+        };
+    }, []);
+
+
+    const switchCamera = useCallback(async () => {
+        const newFacingMode = facingMode === 'environment' ? 'user' : 'environment';
+        const newStream = await startCamera(newFacingMode);
+
+        if (newStream && peerConnectionRef.current) {
+            const videoTrack = newStream.getVideoTracks()[0];
+            const sender = peerConnectionRef.current.getSenders().find(s => s.track?.kind === 'video');
+            if (sender) {
+                sender.replaceTrack(videoTrack);
+                setStatus(`Switched to ${newFacingMode} camera`);
+            }
+        }
+        setFacingMode(newFacingMode);
+    }, [facingMode, startCamera]);
+
+
+    const createPeerConnection = useCallback(async (peerId: string, offer: RTCSessionDescriptionInit) => {
+        const pc = new RTCPeerConnection(ICE_SERVERS);
+        peerConnectionRef.current = pc;
+
+        if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach(track => {
+                try {
+                    pc.addTrack(track, localStreamRef.current!);
+                } catch (e) {
+                    console.error("Error adding track:", e);
+                }
+            });
+        }
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate && socketRef.current) {
+                socketRef.current.emit('ice-candidate', { target: peerId, candidate: event.candidate });
             }
         };
-    }, [startCamera, createPeerConnection]);
+
+        pc.oniceconnectionstatechange = () => {
+            setStatus(`ICE: ${pc.iceConnectionState}`);
+        };
+
+        try {
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            if (socketRef.current) {
+                socketRef.current.emit('answer', { target: peerId, answer: answer });
+            }
+        } catch (error) {
+            console.error("Error creating peer connection:", error);
+        }
+    }, []);
 
     return (
-        <div className="relative w-screen h-screen bg-black">
-            <video
-                ref={localVideoRef}
-                autoPlay
-                muted
-                playsInline
-                className="w-full h-full object-cover"
-            />
-            <div className="absolute bottom-0 left-0 right-0 p-4 bg-black bg-opacity-50 text-center">
-                <h1 className="text-xl font-bold">Streaming Camera</h1>
-                <p className="text-md text-green-400">{status}</p>
+        <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white p-4">
+            <h1 className="text-3xl font-bold mb-4">Phone Camera</h1>
+            <div className="relative w-full max-w-md bg-black rounded-lg overflow-hidden shadow-lg mb-4">
+                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-contain" />
             </div>
+            <p className="font-mono text-sm text-green-400 mb-4 animate-pulse">{status}</p>
+            <button
+                onClick={switchCamera}
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-transform transform hover:scale-105"
+            >
+                Switch Camera
+            </button>
         </div>
     );
 };
