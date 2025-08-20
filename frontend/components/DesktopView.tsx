@@ -10,7 +10,6 @@ const DesktopView = () => {
     const [mode, setMode] = useState('wasm');
     const [showQr, setShowQr] = useState(true);
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-    const [videoResolution, setVideoResolution] = useState({ width: 0, height: 0 }); // <-- NEW STATE
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -18,7 +17,7 @@ const DesktopView = () => {
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const metricsRef = useRef<Metrics>({ latencies: [], frameCount: 0, isBenchmarking: false, startTime: 0 });
 
-    const { detections, isLoadingModel, modelError, metrics: detectionMetrics } = useObjectDetector(videoRef, remoteStream !== null);
+    const { detections, isLoadingModel, modelError } = useObjectDetector(videoRef, remoteStream !== null);
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -247,45 +246,10 @@ const DesktopView = () => {
                     <p className="font-mono text-sm text-green-400 animate-pulse">{isLoadingModel ? "Loading Model..." : (modelError || status)}</p>
                 </div>
                 <div className="relative w-full aspect-video bg-black rounded-b-lg overflow-hidden">
-                    <video
-                        ref={videoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        className="w-full h-full object-contain"
-                        onLoadedMetadata={() => {
-                            setVideoResolution({
-                                width: videoRef.current?.videoWidth || 0,
-                                height: videoRef.current?.videoHeight || 0
-                            });
-                        }}
-                    />
+                    <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-contain" />
                     <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full" />
                 </div>
             </div>
-
-            {/* --- THIS IS THE NEW METRICS SECTION --- */}
-            {!showQr && (
-                <div className="mt-4 w-full max-w-4xl bg-gray-800 p-3 rounded-lg border border-gray-700 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                    <div className="text-white">
-                        <p className="text-sm text-gray-400">Inference Speed</p>
-                        <p className="text-xl font-mono">{detectionMetrics.fps ? detectionMetrics.fps.toFixed(1) : '0.0'} FPS</p>
-                    </div>
-                    <div className="text-white">
-                        <p className="text-sm text-gray-400">E2E Latency (p95)</p>
-                        <p className="text-xl font-mono">{detectionMetrics.p95Latency ? detectionMetrics.p95Latency.toFixed(0) : '0'} ms</p>
-                    </div>
-                    <div className="text-white">
-                        <p className="text-sm text-gray-400">Jitter (network)</p>
-                        <p className="text-xl font-mono">-- ms</p>
-                    </div>
-                    <div className="text-white">
-                        <p className="text-sm text-gray-400">Resolution</p>
-                        <p className="text-xl font-mono">{videoResolution.width}x{videoResolution.height}</p>
-                    </div>
-                </div>
-            )}
-            {/* --- END OF NEW METRICS SECTION --- */}
 
             {showQr && (
                 <div className="mt-8 p-6 bg-white rounded-lg shadow-lg text-center text-gray-800 flex flex-col items-center">
