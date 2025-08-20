@@ -18,7 +18,7 @@ const DesktopView: React.FC = () => {
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const metricsRef = useRef<Metrics>({ latencies: [], frameCount: 0, isBenchmarking: false, startTime: 0 });
 
-    const { detections, isLoadingModel, modelError } = useObjectDetector(videoRef, mode === 'wasm' && remoteStream !== null);
+    const { detections, isLoadingModel, modelError, debugInfo } = useObjectDetector(videoRef, mode === 'wasm' && remoteStream !== null);
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -251,6 +251,9 @@ const DesktopView: React.FC = () => {
             <div className="w-full max-w-4xl bg-gray-800 p-2 rounded-xl shadow-2xl border border-gray-700">
                 <div className="w-full text-center py-2 px-4 bg-gray-900 rounded-t-lg">
                     <p className="font-mono text-sm text-green-400 animate-pulse">{isLoadingModel ? "Loading Model..." : (modelError || status)}</p>
+                    {debugInfo && (
+                        <p className="font-mono text-xs text-blue-400 mt-1">{debugInfo}</p>
+                    )}
                 </div>
                 <div className="relative w-full aspect-video bg-black rounded-b-lg overflow-hidden">
                     <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-contain" />
@@ -262,6 +265,29 @@ const DesktopView: React.FC = () => {
                 <div className="mt-8 p-6 bg-white rounded-lg shadow-lg text-center text-gray-800 flex flex-col items-center">
                     <h2 className="text-xl font-semibold mb-4">Scan with your phone to connect</h2>
                     <div id="qrcode" className="leading-[0]"></div>
+                </div>
+            )}
+
+            {/* Debug Controls */}
+            {!showQr && (
+                <div className="mt-4 w-full max-w-4xl flex gap-4 justify-center">
+                    <button 
+                        onClick={() => {
+                            console.log('[DEBUG] Manual test - Current detections:', detections);
+                            console.log('[DEBUG] Video element:', videoRef.current);
+                            console.log('[DEBUG] Video dimensions:', videoRef.current?.videoWidth, 'x', videoRef.current?.videoHeight);
+                            console.log('[DEBUG] Remote stream:', remoteStream);
+                        }}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm"
+                    >
+                        Debug Info
+                    </button>
+                    <a 
+                        href="/#/test"
+                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm"
+                    >
+                        Test Model
+                    </a>
                 </div>
             )}
 

@@ -11,7 +11,7 @@ export const ICE_SERVERS = {
 export const MODEL_PATH = (import.meta as any).env?.VITE_MODEL_PATH || '/models/yolov5n-quantized.onnx';
 export const MODEL_WIDTH = 640;
 export const MODEL_HEIGHT = 640;
-export const CONFIDENCE_THRESHOLD = 0.45;
+export const CONFIDENCE_THRESHOLD = 0.15;
 export const NMS_IOU_THRESHOLD = 0.5;
 
 // COCO classes for YOLOv5

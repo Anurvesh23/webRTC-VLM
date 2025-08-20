@@ -3,6 +3,7 @@ import React from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import DesktopView from './components/DesktopView';
 import PhoneView from './components/PhoneView';
+import TestDetection from './components/TestDetection';
 
 const App: React.FC = () => {
   return (
@@ -11,6 +12,7 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/" element={<DesktopView />} />
           <Route path="/phone" element={<PhoneView />} />
+          <Route path="/test" element={<TestDetection />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </HashRouter>
