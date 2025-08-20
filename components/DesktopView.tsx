@@ -17,7 +17,7 @@ const DesktopView: React.FC = () => {
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const metricsRef = useRef<Metrics>({ latencies: [], frameCount: 0, isBenchmarking: false, startTime: 0 });
 
-    const { detections, isLoadingModel, modelError, debugInfo } = useObjectDetector(videoRef, mode === 'wasm' && remoteStream !== null);
+    const { detections, isLoadingModel, modelError } = useObjectDetector(videoRef, remoteStream !== null);
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -116,7 +116,6 @@ const DesktopView: React.FC = () => {
             }
         };
 
-        // Ensure we request a video recv-only m-line so the phone can send us its camera track
         try {
             pc.addTransceiver('video', { direction: 'recvonly' });
         } catch {}
@@ -128,7 +127,6 @@ const DesktopView: React.FC = () => {
                 socketRef.current.emit('offer', { from: socketRef.current.id, target: peerId, offer });
             }
         } else {
-            // Server mode handshake
             try {
                 const response = await fetch(`${API_SERVER_URL}/offer`, {
                     method: 'POST',
@@ -145,7 +143,6 @@ const DesktopView: React.FC = () => {
     }, [mode]);
 
     const colorForClass = (classId: number): string => {
-        // Simple deterministic color palette based on classId
         const hue = (classId * 47) % 360;
         return `hsl(${hue}, 80%, 55%)`;
     };
@@ -188,7 +185,6 @@ const DesktopView: React.FC = () => {
         if (detections.length > 0) {
             drawDetections(detections);
         } else {
-            // Clear canvas if no detections
             const canvas = canvasRef.current;
              if(canvas) {
                 const ctx = canvas.getContext('2d');
@@ -200,7 +196,6 @@ const DesktopView: React.FC = () => {
     useEffect(() => {
         const startBenchmark = () => {
             metricsRef.current = { latencies: [], frameCount: 0, isBenchmarking: true, startTime: performance.now() };
-            console.log("--- BENCHMARK STARTED ---");
             return "Benchmark started. Run window.stopBenchmark() after 30 seconds.";
         };
 
@@ -229,7 +224,6 @@ const DesktopView: React.FC = () => {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             
-            console.log("--- BENCHMARK FINISHED ---");
             console.table(result);
             return "Benchmark finished. metrics.json has been downloaded.";
         };
@@ -250,9 +244,6 @@ const DesktopView: React.FC = () => {
             <div className="w-full max-w-4xl bg-gray-800 p-2 rounded-xl shadow-2xl border border-gray-700">
                 <div className="w-full text-center py-2 px-4 bg-gray-900 rounded-t-lg">
                     <p className="font-mono text-sm text-green-400 animate-pulse">{isLoadingModel ? "Loading Model..." : (modelError || status)}</p>
-                    {debugInfo && (
-                        <p className="font-mono text-xs text-blue-400 mt-1">{debugInfo}</p>
-                    )}
                 </div>
                 <div className="relative w-full aspect-video bg-black rounded-b-lg overflow-hidden">
                     <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-contain" />
@@ -267,7 +258,6 @@ const DesktopView: React.FC = () => {
                 </div>
             )}
 
-            {/* Legend with multi-object counts */}
             {!showQr && detections.length > 0 && (
                 <div className="mt-4 w-full max-w-md bg-gray-800 p-3 rounded-lg border border-gray-700">
                     <h3 className="text-lg font-semibold text-white mb-2 text-center">Detected Objects</h3>
