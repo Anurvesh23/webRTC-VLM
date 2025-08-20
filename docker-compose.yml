@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  frontend:
+    build: ./frontend
+    container_name: webrtc_frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - webrtc_net
+    environment:
+      # This tells the React app inside the container where to find the signaling server
+      - VITE_SIGNALING_SERVER_URL=http://localhost:3001 
+
+  signaling:
+    build: ./signaling
+    container_name: webrtc_signaling
+    ports:
+      - "3001:3001"
+    networks:
+      - webrtc_net
+
+networks:
+  webrtc_net:
+    driver: bridge
