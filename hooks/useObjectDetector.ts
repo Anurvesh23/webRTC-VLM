@@ -18,22 +18,22 @@ const useObjectDetector = (
 
     const loadModel = useCallback(async () => {
         if (!enabled || onnxSessionRef.current) return;
-        console.log("Starting model load...");
         setIsLoadingModel(true);
         setModelError(null);
         
         try {
             ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
             const modelResponse = await fetch(MODEL_PATH, { cache: 'no-store' });
-             if (!modelResponse.ok) {
-                throw new Error(`Model fetch failed with status: ${modelResponse.status}`);
+            if (!modelResponse.ok) {
+                throw new Error(`HTTP ${modelResponse.status} fetching ${MODEL_PATH}`);
             }
-            console.log("Model fetched successfully.");
+            const contentType = modelResponse.headers.get('content-type') || '';
+            if (contentType.includes('text/html')) {
+                throw new Error(`Expected binary model but received HTML. Check if /models/yolov5n-quantized.onnx exists in the public directory.`);
+            }
             const modelBuffer = await modelResponse.arrayBuffer();
-            console.log("Creating ONNX session...");
             const session = await ort.InferenceSession.create(modelBuffer);
             onnxSessionRef.current = session;
-            console.log("ONNX session created successfully.");
         } catch (e) {
             console.error('Failed to load ONNX model:', e);
             setModelError(`Error: Failed to load model. ${(e as Error).message}`);
@@ -82,8 +82,7 @@ const useObjectDetector = (
             console.warn(`Unexpected output length: ${output.length}, expected: ${numProposals * boxStride}`);
             return [];
         }
-        
-        let detectionsCount = 0;
+    
         for (let i = 0; i < numProposals; i++) {
             const offset = i * boxStride;
             const confidence = output[offset + 4];
@@ -102,7 +101,6 @@ const useObjectDetector = (
     
             const finalScore = maxProb * confidence;
             if (finalScore > CONFIDENCE_THRESHOLD) {
-                detectionsCount++;
                 const centerX = output[offset];
                 const centerY = output[offset + 1];
                 const width = output[offset + 2];
@@ -115,16 +113,7 @@ const useObjectDetector = (
             }
         }
         
-        if(detectionsCount > 0) {
-             console.log(`Found ${detectionsCount} potential objects before filtering.`);
-        }
-
-        const finalDetections = nonMaxSuppression(boxes);
-        if(finalDetections.length > 0) {
-            console.log(`Final detections after filtering: ${finalDetections.length}`);
-        }
-
-        return finalDetections;
+        return nonMaxSuppression(boxes);
     }, []);
 
     const nonMaxSuppression = (boxes: DetectionBox[]): DetectionBox[] => {
@@ -164,12 +153,11 @@ const useObjectDetector = (
         latestFrameRef.current = null;
     
         try {
-            console.log("Running inference on a new frame...");
             const inputTensor = preprocess(currentFrame);
             const inputName = onnxSessionRef.current.inputNames[0];
             const feeds = { [inputName]: inputTensor };
             const results = await onnxSessionRef.current.run(feeds);
-            console.log("Inference complete. Post-processing results...");
+            
             const newDetections = postprocess(results.output.data as Float32Array);
             setDetections(newDetections);
 
@@ -206,7 +194,6 @@ const useObjectDetector = (
         }
 
         const onPlay = () => {
-            console.log("Video is playing. Starting detection loop.");
             frameCaptureId = requestAnimationFrame(captureFrame);
             animationFrameId.current = requestAnimationFrame(runDetectionLoop);
         };
